@@ -46,6 +46,10 @@ Then fill in `.env` with:
 
 Never commit `.env` — it's gitignored. `config.py` loads it via `python-dotenv` and every API client raises a clear `RuntimeError` naming the missing key if you forget a step.
 
+**You don't need all three keys to start.** `experiments/run_scaling_curves.py` checks which of `GOOGLE_API_KEY` / `DEEPSEEK_API_KEY` / `GROQ_API_KEY` are actually set and only builds clients for those — leave a key blank in `.env` and that provider's model(s) are skipped (logged as a warning, not an error). For example, with only `GOOGLE_API_KEY` filled in, the experiment runs against `gemini_primary` and `gemini_secondary` only, producing valid scaling curves for just those two models; add `DEEPSEEK_API_KEY`/`GROQ_API_KEY` later and re-run to extend the same results file with the other models (already-completed rows are never touched — see Stage 2 below).
+
+The benchmark-build stage (`distractors/build_benchmark.py`) only ever uses Gemini (as both the distractor generator and the scoring reference model — see §5.2), so it needs `GOOGLE_API_KEY` alone regardless of which models you plan to run the main experiment against.
+
 ### 2.3 Local model (for the mechanistic-analysis stage)
 
 The attention/probe stage (§3, Stage 4) additionally downloads and runs `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` locally (~3GB). No API key needed for this — it runs on-device. See §5.1 (Known Limitations) for why this stage needs a 4th, local model at all.

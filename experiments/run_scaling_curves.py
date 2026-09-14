@@ -98,32 +98,77 @@ def _load_benchmark() -> list:
         return json.load(f)
 
 
+# Maps each provider to the config.py attribute holding its API key.
+# WHY this mapping exists: _build_model_clients() below uses it to decide
+# whether to even attempt constructing a given model's client, rather
+# than trying and catching the resulting RuntimeError — checking first
+# means a partial API key set (e.g. only GOOGLE_API_KEY during early
+# testing) produces one clear "skipping X" log line per missing key
+# instead of an exception per missing key.
+_PROVIDER_API_KEY_ATTR = {
+    "gemini": "GOOGLE_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "groq": "GROQ_API_KEY",
+}
+
+
 def _build_model_clients() -> dict:
     """
-    WHAT: Constructs one client per entry in config.MODEL_SPECS.
+    WHAT: Constructs one client per entry in config.MODEL_SPECS whose
+          provider has an API key configured, skipping the rest.
 
-    WHY: Constructing all three clients once, up front, means each
+    WHY: Constructing every available client once, up front, means each
          client's fail-fast model-id validation (see each client's
          __init__) runs before any of the 75,600 calls are attempted —
-         a dead model id for any of the three fails the whole run
+         a dead model id for any configured model fails the whole run
          immediately with a clear message, rather than after burning
          through however many instances complete before that model is
          first used in the loop.
 
+         Skipping models whose API key is absent (rather than requiring
+         all three keys up front) means this project's 5-week timeline
+         doesn't block on provisioning every key at once — running with
+         only GOOGLE_API_KEY set, for instance, exercises exactly the
+         Gemini-family models and produces valid, independently
+         analyzable scaling curves for them; analysis/compute_metrics.py
+         and analysis/plot_curves.py already operate per model_key
+         actually present in the saved results, so no downstream change
+         is needed to analyze a partial run.
+
     Returns:
-        dict: {model_key (str): ModelClient instance} for every key in
-              config.MODEL_SPECS.
+        dict: {model_key (str): ModelClient instance}, one entry per
+              config.MODEL_SPECS key whose provider's API key is set.
+
+    Raises:
+        RuntimeError: If no provider has an API key configured at all —
+                      there would be nothing for the experiment to run.
     """
     clients = {}
     for model_key, spec in config.MODEL_SPECS.items():
-        if spec["provider"] == "gemini":
+        provider = spec["provider"]
+        required_key_attr = _PROVIDER_API_KEY_ATTR[provider]
+        if not getattr(config, required_key_attr):
+            logger.warning(
+                "Skipping model_key=%s (provider=%s): %s is not set in .env",
+                model_key, provider, required_key_attr,
+            )
+            continue
+
+        if provider == "gemini":
             clients[model_key] = GeminiClient(spec["model_id"])
-        elif spec["provider"] == "deepseek":
+        elif provider == "deepseek":
             clients[model_key] = DeepSeekClient(spec["model_id"])
-        elif spec["provider"] == "groq":
+        elif provider == "groq":
             clients[model_key] = GroqClient(spec["model_id_candidates"])
         else:
-            raise ValueError(f"Unknown provider {spec['provider']!r} for model_key={model_key!r}")
+            raise ValueError(f"Unknown provider {provider!r} for model_key={model_key!r}")
+
+    if not clients:
+        raise RuntimeError(
+            "No model API keys are set in .env — at least one of "
+            "GOOGLE_API_KEY, DEEPSEEK_API_KEY, or GROQ_API_KEY is required."
+        )
+    logger.info("Running scaling curves with models: %s", list(clients.keys()))
     return clients
 
 
