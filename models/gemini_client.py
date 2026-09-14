@@ -149,21 +149,32 @@ class GeminiClient(ModelClient):
         """
         start = time.monotonic()
 
+        # WHY omit thinking_config entirely for token_budget <= 0, rather
+        # than passing ThinkingConfig(thinking_budget=0): confirmed live
+        # against the API that some Gemini generations (gemini-3.6-flash,
+        # gemini-3.5-flash-lite — used by distractors/generator.py at
+        # GENERATOR_TOKEN_BUDGET=0) reject an explicit thinking_budget=0
+        # with 400 INVALID_ARGUMENT, even though gemini-3.5-flash accepts
+        # it. Omitting the config is accepted by every model tested and
+        # produces the intended "no/minimal thinking" behavior: models
+        # with thinking off by default (e.g. flash-lite) stay off, and
+        # this project never requests budget=0 from a model that defaults
+        # to thinking-on.
+        generation_config = types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(
+                thinking_budget=token_budget,
+                # WHY True only when thinking is on: requesting thought
+                # summaries while thinking is disabled has no thoughts to
+                # summarize, and ModelResponse.reasoning_text is None for
+                # this call regardless, so requesting is pointless.
+                include_thoughts=True,
+            ),
+        ) if token_budget > 0 else types.GenerateContentConfig()
+
         response = self._client.models.generate_content(
             model=self.model_id,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                thinking_config=types.ThinkingConfig(
-                    thinking_budget=token_budget,
-                    # WHY True: without requesting thought summaries, the
-                    # API only returns the final answer text, which would
-                    # leave ModelResponse.reasoning_text permanently None
-                    # for Gemini — defeating Week 4's attention/probe
-                    # analysis need to distinguish reasoning content from
-                    # final-answer content.
-                    include_thoughts=True,
-                ),
-            ),
+            config=generation_config,
         )
         elapsed = time.monotonic() - start
 
