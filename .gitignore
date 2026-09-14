@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+hf_cache/
+.pytest_cache/
+.claude/
+
+# Generated experiment outputs — fully regenerable via the pipeline
+# scripts documented in README.md (fixed seed=42 makes every step
+# reproducible), and scaling_results.jsonl in particular will grow to
+# tens of MB across the full 75,600-call experiment. Keeping generated
+# data out of version control keeps the repo scoped to code + config.
+results/
