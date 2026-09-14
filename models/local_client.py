@@ -134,7 +134,7 @@ class LocalReasoningModel:
             model_id,
             cache_dir=str(config.DATA_CACHE_DIR),
             attn_implementation="eager",  # required to materialize attention weights — see module DESIGN DECISIONS
-            torch_dtype=torch.float32,
+            dtype=torch.float32,
             output_hidden_states=True,
         ).to(self.device)
         self.model.eval()
@@ -181,13 +181,20 @@ class LocalReasoningModel:
             output_hidden_states=True,
         )
 
+        # Move every tensor to CPU before returning. WHY: on Apple
+        # Silicon, self.device is "mps" — every downstream consumer
+        # (analysis/attention_entropy.py, analysis/linear_probe.py) calls
+        # .numpy() on these tensors, which PyTorch refuses to do directly
+        # from an MPS (or CUDA) tensor. Converting once, here, at the
+        # source, means no analysis code needs to know or care what
+        # device generation ran on.
         return LocalGenerationResult(
             prompt=prompt,
             answer_text=answer_text,
-            input_ids=generated,
+            input_ids=generated.cpu(),
             prompt_length=prompt_length,
-            attentions=outputs.attentions,
-            hidden_states=outputs.hidden_states,
+            attentions=tuple(a.cpu() for a in outputs.attentions),
+            hidden_states=tuple(h.cpu() for h in outputs.hidden_states),
         )
 
 
